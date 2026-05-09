@@ -8,7 +8,10 @@ CORS(app)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True
+)
 
 @app.route('/')
 def home():
