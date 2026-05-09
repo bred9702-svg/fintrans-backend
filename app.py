@@ -71,3 +71,10 @@ def get_all_transactions():
 @app.route('/rates', methods=['GET'])
 def get_rates():
     return jsonify(RATES), 200
+
+@app.route('/debug')
+def debug():
+    return jsonify({
+        "supabase_url": os.environ.get("SUPABASE_URL", "NON TROUVÉ"),
+        "supabase_key": "OK" if os.environ.get("SUPABASE_KEY") else "NON TROUVÉ"
+    })
