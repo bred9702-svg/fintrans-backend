@@ -13,10 +13,7 @@ supabase = create_client(
     os.environ.get("SUPABASE_URL"),
     os.environ.get("SUPABASE_KEY")
 )
-   
-"https://hxydrsi wcnhvbmmn twqw.supabase.co",
-"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4eWRyc2l3Y25odmJtbW50d3F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NDIwMTgsImV4cCI6MjA5MjQxODAxOH0.pQRX0S1iRu6lh7-qp_rU2_qw6JFEk0rL-BYM9IKafvk",
-)
+
 FEE_PERCENT = 0.07
 RATES = {
     "RDC_TO_KEN": 129.50,
