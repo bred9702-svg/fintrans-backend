@@ -10,8 +10,8 @@ CORS(app)
 
 # SUPABASE
 supabase = create_client(
-    "https://xxxxx.supabase.co",  # ta vraie URL
-    "ta_vraie_anon_key"           # ta vraie clé
+    "https://xxxxx.supabase.co",  # eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4eWRyc2l3Y25odmJtbW50d3F3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NDIwMTgsImV4cCI6MjA5MjQxODAxOH0.pQRX0S1iRu6lh7-qp_rU2_qw6JFEk0rL-BYM9IKafvk
+    "ta_vraie_anon_key"           # eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4eWRyc2l3Y25odmJtbW50d3F3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Njg0MjAxOCwiZXhwIjoyMDkyNDE4MDE4fQ.g_gA60DDEWG0iA5YdQsaeRfJXRQwDJDbD0am7p_KOGI
 )
 FEE_PERCENT = 0.07
 RATES = {
