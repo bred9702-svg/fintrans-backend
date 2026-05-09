@@ -14,37 +14,14 @@ def home():
 
 @app.route('/transactions')
 def transactions():
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
 
-        cur = conn.cursor()
+    cur.execute("SELECT * FROM transactions")
 
-        cur.execute("SELECT * FROM transactions")
+    rows = cur.fetchall()
 
-        rows = cur.fetchall()
+    cur.close()
+    conn.close()
 
-        transactions = []
-
-        for row in rows:
-            transactions.append({
-                "id": str(row[0]),
-                "sender_name": row[1],
-                "sender_phone": row[2],
-                "receiver_name": row[3],
-                "receiver_phone": row[4],
-                "amount": float(row[5]),
-                "direction": row[6],
-                "status": row[7],
-                "created_at": str(row[8])
-            })
-
-        cur.close()
-        conn.close()
-
-        return jsonify(transactions)
-
-    except Exception as e:
-        return jsonify({
-            "error": str(e)
-        }), 500
-        
+    return jsonify(rows)
