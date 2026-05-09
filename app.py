@@ -10,10 +10,9 @@ CORS(app)
 
 # SUPABASE
 supabase = create_client(
-    os.environ.get("SUPABASE_URL"),
-    os.environ.get("SUPABASE_KEY")
+    "https://xxxxx.supabase.co",  # ta vraie URL
+    "ta_vraie_anon_key"           # ta vraie clé
 )
-
 FEE_PERCENT = 0.07
 RATES = {
     "RDC_TO_KEN": 129.50,
