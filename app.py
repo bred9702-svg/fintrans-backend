@@ -26,8 +26,8 @@ RATES = {
 }
 
 CORRESPONDENTS = {
-    "RDC_TO_KEN": {"deposit": "AIRTEL_MONEY_COD", "payout": "MPESA_KEN"},
-    "KEN_TO_RDC": {"deposit": "MPESA_KEN", "payout": "AIRTEL_MONEY_COD"}
+    "RDC_TO_KEN": {"deposit": "AIRTEL_COD", "payout": "MPESA_KEN"},
+    "KEN_TO_RDC": {"deposit": "MPESA_KEN", "payout": "AIRTEL_COD"}
 }
 
 CURRENCIES = {
