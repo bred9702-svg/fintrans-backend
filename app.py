@@ -35,9 +35,22 @@ CURRENCIES = {
     "KEN_TO_RDC": {"deposit": "KES", "payout": "CDF"}
 }
 
+# Messages d'erreur lisibles
+FAILURE_MESSAGES = {
+    "AUTHENTICATION_ERROR": "PIN incorrect. Veuillez recommencer.",
+    "INSUFFICIENT_BALANCE": "Solde insuffisant sur le compte Mobile Money.",
+    "PAYER_LIMIT_REACHED": "Limite de transfert atteinte sur votre compte Mobile Money.",
+    "PAYEE_NOT_FOUND": "Le numero du beneficiaire n'a pas de compte Mobile Money.",
+    "PAYER_NOT_FOUND": "Votre numero n'a pas de compte Mobile Money.",
+    "TRANSACTION_ALREADY_IN_PROCESS": "Une transaction est deja en cours sur ce numero.",
+    "TIMEOUT": "Delai depasse. La confirmation n'a pas ete recue a temps.",
+    "PROVIDER_TEMPORARILY_UNAVAILABLE": "L'operateur Mobile Money est temporairement indisponible.",
+    "OTHER": "Une erreur est survenue. Veuillez reessayer ou contacter le support."
+}
+
 @app.route('/')
 def home():
-    return "MuniaPay Backend Live 🚀"
+    return "MuniaPay Backend Live"
 
 @app.route('/transfer', methods=['POST'])
 def create_transfer():
@@ -58,7 +71,7 @@ def create_transfer():
     amount_received = round(net * RATES[direction], 2)
     transaction_id = str(uuid.uuid4())
 
-    # 1. Créer en DB
+    # 1. Creer en DB
     supabase.table("transactions").insert({
         "id": transaction_id,
         "sender_name": data['senderName'],
@@ -72,7 +85,7 @@ def create_transfer():
         "status": "PENDING"
     }).execute()
 
-    # 2. Initier le dépôt Pawapay
+    # 2. Initier le depot Pawapay
     deposit_response = requests.post(
         f"{PAWAPAY_URL}/deposits",
         json={
@@ -93,12 +106,12 @@ def create_transfer():
         }
     )
 
-    print("=== PAWAPAY RESPONSE ===")
+    print("=== PAWAPAY DEPOSIT RESPONSE ===")
     print("Status:", deposit_response.status_code)
     print("Body:", deposit_response.text)
-    print("========================")
+    print("================================")
 
-    # 3. Mettre à jour le statut
+    # 3. Mettre a jour le statut
     supabase.table("transactions").update(
         {"status": "COLLECTING"}
     ).eq("id", transaction_id).execute()
@@ -118,27 +131,34 @@ def webhook_deposit():
     print("=== WEBHOOK DEPOSIT ===")
     print("Body:", data)
     print("=======================")
+    
     deposit_id = data.get("depositId")
     status = data.get("status")
 
     if status == "COMPLETED":
-        # Récupérer la transaction
+        # Recuperer la transaction
         result = supabase.table("transactions").select("*").eq("id", deposit_id).execute()
         if not result.data:
             return jsonify({"error": "Transaction introuvable"}), 404
 
         transaction = result.data[0]
 
-        # Mettre à jour le statut
+        # Mettre a jour le statut
         supabase.table("transactions").update(
             {"status": "SENDING"}
         ).eq("id", deposit_id).execute()
 
+        # Generer un ID unique pour le payout et le stocker
+        payout_id = str(uuid.uuid4())
+        supabase.table("transactions").update(
+            {"payout_id": payout_id}
+        ).eq("id", deposit_id).execute()
+
         # Initier le payout
-        requests.post(
+        payout_response = requests.post(
             f"{PAWAPAY_URL}/payouts",
             json={
-                "payoutId": str(uuid.uuid4()),
+                "payoutId": payout_id,
                 "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "amount": str(transaction["amount_received"]),
                 "currency": CURRENCIES[transaction["direction"]]["payout"],
@@ -154,11 +174,20 @@ def webhook_deposit():
                 "Content-Type": "application/json"
             }
         )
+        print("=== PAYOUT INITIATED ===")
+        print("Status:", payout_response.status_code)
+        print("Body:", payout_response.text)
+        print("========================")
 
     elif status == "FAILED":
-        supabase.table("transactions").update(
-            {"status": "FAILED"}
-        ).eq("id", deposit_id).execute()
+        # Recuperer la raison de l'echec
+        failure_reason_code = data.get("failureReason", {}).get("failureCode", "OTHER")
+        failure_message = FAILURE_MESSAGES.get(failure_reason_code, FAILURE_MESSAGES["OTHER"])
+        
+        supabase.table("transactions").update({
+            "status": "FAILED",
+            "failure_reason": failure_message
+        }).eq("id", deposit_id).execute()
 
     return jsonify({"status": "ok"}), 200
 
@@ -169,24 +198,77 @@ def webhook_payout():
     print("=== WEBHOOK PAYOUT ===")
     print("Body:", data)
     print("======================")
+    
     payout_id = data.get("payoutId")
     status = data.get("status")
+
+    # Retrouver la transaction via payout_id
+    result = supabase.table("transactions").select("*").eq("payout_id", payout_id).execute()
+    if not result.data:
+        print(f"Transaction non trouvee pour payout_id: {payout_id}")
+        return jsonify({"status": "ok"}), 200
+    
+    transaction = result.data[0]
+    transaction_id = transaction["id"]
 
     if status == "COMPLETED":
         supabase.table("transactions").update(
             {"status": "COMPLETED"}
-        ).eq("id", payout_id).execute()
+        ).eq("id", transaction_id).execute()
 
     elif status == "FAILED":
-        supabase.table("transactions").update(
-            {"status": "FAILED"}
-        ).eq("id", payout_id).execute()
+        # Recuperer la raison de l'echec
+        failure_reason_code = data.get("failureReason", {}).get("failureCode", "OTHER")
+        failure_message = FAILURE_MESSAGES.get(failure_reason_code, FAILURE_MESSAGES["OTHER"])
+        
+        # Initier le refund automatique
+        refund_id = str(uuid.uuid4())
+        refund_response = requests.post(
+            f"{PAWAPAY_URL}/refunds",
+            json={
+                "refundId": refund_id,
+                "depositId": transaction_id,
+                "amount": str(transaction["amount_sent"]),
+                "metadata": [
+                    {"fieldName": "reason", "fieldValue": f"Payout failed: {failure_reason_code}"}
+                ]
+            },
+            headers={
+                "Authorization": f"Bearer {PAWAPAY_TOKEN}",
+                "Content-Type": "application/json"
+            }
+        )
+        print("=== REFUND INITIATED ===")
+        print("Status:", refund_response.status_code)
+        print("Body:", refund_response.text)
+        print("========================")
+        
+        supabase.table("transactions").update({
+            "status": "FAILED",
+            "failure_reason": failure_message + " Un remboursement automatique est en cours."
+        }).eq("id", transaction_id).execute()
 
     return jsonify({"status": "ok"}), 200
 
 
 @app.route('/webhook/refund', methods=['POST'])
 def webhook_refund():
+    data = request.get_json()
+    print("=== WEBHOOK REFUND ===")
+    print("Body:", data)
+    print("======================")
+    
+    refund_id = data.get("refundId")
+    deposit_id = data.get("depositId")
+    status = data.get("status")
+    
+    if status == "COMPLETED" and deposit_id:
+        # Marquer le refund comme reussi
+        supabase.table("transactions").update({
+            "status": "REFUNDED",
+            "failure_reason": "Remboursement effectue avec succes."
+        }).eq("id", deposit_id).execute()
+    
     return jsonify({"status": "ok"}), 200
 
 
