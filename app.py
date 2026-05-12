@@ -92,6 +92,11 @@ def create_transfer():
         }
     )
 
+    print("=== PAWAPAY RESPONSE ===")
+    print("Status:", deposit_response.status_code)
+    print("Body:", deposit_response.text)
+    print("========================")
+
     # 3. Mettre à jour le statut
     supabase.table("transactions").update(
         {"status": "COLLECTING"}
