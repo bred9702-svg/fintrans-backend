@@ -136,6 +136,7 @@ def webhook_deposit():
             f"{PAWAPAY_URL}/payouts",
             json={
                 "payoutId": str(uuid.uuid4()),
+                "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "amount": str(transaction["amount_received"]),
                 "currency": CURRENCIES[transaction["direction"]]["payout"],
                 "correspondent": CORRESPONDENTS[transaction["direction"]]["payout"],
