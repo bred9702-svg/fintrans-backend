@@ -114,10 +114,10 @@ def create_transfer():
 
 @app.route('/webhook/deposit', methods=['POST'])
 def webhook_deposit():
+    data = request.get_json()
     print("=== WEBHOOK DEPOSIT ===")
     print("Body:", data)
     print("=======================")
-    data = request.get_json()
     deposit_id = data.get("depositId")
     status = data.get("status")
 
@@ -165,10 +165,10 @@ def webhook_deposit():
 
 @app.route('/webhook/payout', methods=['POST'])
 def webhook_payout():
+    data = request.get_json()
     print("=== WEBHOOK PAYOUT ===")
     print("Body:", data)
     print("======================")
-    data = request.get_json()
     payout_id = data.get("payoutId")
     status = data.get("status")
 
