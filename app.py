@@ -77,6 +77,7 @@ def create_transfer():
         f"{PAWAPAY_URL}/deposits",
         json={
             "depositId": transaction_id,
+            "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "amount": str(amount),
             "currency": CURRENCIES[direction]["deposit"],
             "correspondent": CORRESPONDENTS[direction]["deposit"],
