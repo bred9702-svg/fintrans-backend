@@ -31,8 +31,8 @@ CORRESPONDENTS = {
 }
 
 CURRENCIES = {
-    "RDC_TO_KEN": {"deposit": "CDF", "payout": "KES"},
-    "KEN_TO_RDC": {"deposit": "KES", "payout": "CDF"}
+    "RDC_TO_KEN": {"deposit": "USD", "payout": "KES"},
+    "KEN_TO_RDC": {"deposit": "KES", "payout": "USD"}
 }
 
 # Messages d'erreur lisibles
