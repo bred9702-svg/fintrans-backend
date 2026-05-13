@@ -91,7 +91,7 @@ def create_transfer():
         json={
             "depositId": transaction_id,
             "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "amount": str(amount),
+            "amount": str(int(amount)) if CORRESPONDENTS[direction]["deposit"] == "MPESA_KEN" else str(amount),
             "currency": CURRENCIES[direction]["deposit"],
             "correspondent": CORRESPONDENTS[direction]["deposit"],
             "payer": {
