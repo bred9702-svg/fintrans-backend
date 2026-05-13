@@ -18,6 +18,7 @@ supabase = create_client(
 # PAWAPAY
 PAWAPAY_URL = "https://api.sandbox.pawapay.cloud"
 PAWAPAY_TOKEN = os.environ.get("PAWAPAY_TOKEN")
+CHECK_BALANCE = os.environ.get("CHECK_BALANCE", "false").lower() == "true"
 
 FEE_PERCENT = 0.07
 RATES = {
@@ -84,6 +85,40 @@ def create_transfer():
         "direction": direction,
         "status": "PENDING"
     }).execute()
+
+    # 2. Verifier le solde du wallet destination (seulement si CHECK_BALANCE est activé)
+    if CHECK_BALANCE:
+        payout_currency = CURRENCIES[direction]["payout"]
+        
+        balance_response = requests.get(
+            f"{PAWAPAY_URL}/v2/wallet-balances",
+            headers={"Authorization": f"Bearer {PAWAPAY_TOKEN}"}
+        )
+        
+        print("=== WALLET BALANCES ===")
+        print("Status:", balance_response.status_code)
+        print("Body:", balance_response.text)
+        print("=======================")
+        
+        if balance_response.status_code == 200:
+            balances = balance_response.json()
+            wallets = balances.get("balances", [])
+            payout_wallet = next((w for w in wallets if w.get("currency") == payout_currency), None)
+            
+            if payout_wallet:
+                available = float(payout_wallet.get("balance", 0))
+                if available < amount_received:
+                    supabase.table("transactions").update({
+                        "status": "FAILED",
+                        "failure_reason": "Service temporairement indisponible. Veuillez reessayer plus tard."
+                    }).eq("id", transaction_id).execute()
+                    
+                    return jsonify({
+                        "id": transaction_id,
+                        "status": "FAILED",
+                        "error": "INSUFFICIENT_LIQUIDITY",
+                        "message": "Service temporairement indisponible."
+                    }), 503
 
     # 2. Initier le depot Pawapay
     deposit_response = requests.post(
