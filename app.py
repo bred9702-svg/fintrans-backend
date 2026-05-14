@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://muniapay-frontend.vercel.app"])
 
 # SUPABASE
 supabase = create_client(
