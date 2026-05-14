@@ -1,5 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from supabase import create_client
 import os
 import uuid
@@ -8,6 +10,12 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app, origins=["https://muniapay-frontend.vercel.app"])
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["100 per minute"]
+)
 
 # SUPABASE
 supabase = create_client(
@@ -54,6 +62,7 @@ def home():
     return "MuniaPay Backend Live"
 
 @app.route('/transfer', methods=['POST'])
+@limiter.limit("10 per minute")
 def create_transfer():
     data = request.get_json()
 
