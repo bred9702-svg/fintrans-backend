@@ -1,3 +1,4 @@
+import os
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 
@@ -13,7 +14,6 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from supabase import create_client
-import os
 import uuid
 import requests
 import re
