@@ -29,9 +29,28 @@ PAWAPAY_TOKEN = os.environ.get("PAWAPAY_TOKEN")
 CHECK_BALANCE = os.environ.get("CHECK_BALANCE", "false").lower() == "true"
 
 FEE_PERCENT = 0.07
-RATES = {
-    "RDC_TO_KEN": 129.50,
-    "KEN_TO_RDC": 0.00772
+
+def get_live_rates():
+    """Recupere les taux de change en temps reel depuis l'API"""
+    try:
+        response = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            usd_to_kes = data["rates"]["KES"]
+            return {
+                "RDC_TO_KEN": usd_to_kes,
+                "KEN_TO_RDC": 1 / usd_to_kes
+            }
+    except Exception as e:
+        print(f"Erreur API exchange rates: {e}")
+    
+    # Fallback si l'API echoue
+    return {
+        "RDC_TO_KEN": 129.50,
+        "KEN_TO_RDC": 0.00772
+    }
+
+RATES = get_live_rates()
 }
 
 CORRESPONDENTS = {
