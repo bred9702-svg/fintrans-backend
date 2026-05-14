@@ -471,3 +471,7 @@ def get_all_transactions():
 @app.route('/rates', methods=['GET'])
 def get_rates():
     return jsonify(RATES), 200
+
+@app.route('/sentry-test')
+def sentry_test():
+    raise Exception("Test Sentry - cette erreur est volontaire")
