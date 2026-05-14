@@ -6,7 +6,9 @@ from supabase import create_client
 import os
 import uuid
 import requests
+import re
 from datetime import datetime
+from functools import wraps
 
 app = Flask(__name__)
 CORS(app, origins=["https://muniapay-frontend.vercel.app"])
@@ -27,6 +29,10 @@ supabase = create_client(
 PAWAPAY_URL = "https://api.sandbox.pawapay.cloud"
 PAWAPAY_TOKEN = os.environ.get("PAWAPAY_TOKEN")
 CHECK_BALANCE = os.environ.get("CHECK_BALANCE", "false").lower() == "true"
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
+
+# Timeout pour toutes les requetes Pawapay
+PAWAPAY_TIMEOUT = 10
 
 FEE_PERCENT = 0.07
 
@@ -44,7 +50,6 @@ def get_live_rates():
     except Exception as e:
         print(f"Erreur API exchange rates: {e}")
     
-    # Fallback si l'API echoue
     return {
         "RDC_TO_KEN": 129.50,
         "KEN_TO_RDC": 0.00772
@@ -62,7 +67,6 @@ CURRENCIES = {
     "KEN_TO_RDC": {"deposit": "KES", "payout": "USD"}
 }
 
-# Messages d'erreur lisibles
 FAILURE_MESSAGES = {
     "AUTHENTICATION_ERROR": "PIN incorrect. Veuillez recommencer.",
     "INSUFFICIENT_BALANCE": "Solde insuffisant sur le compte Mobile Money.",
@@ -74,6 +78,39 @@ FAILURE_MESSAGES = {
     "PROVIDER_TEMPORARILY_UNAVAILABLE": "L'operateur Mobile Money est temporairement indisponible.",
     "OTHER": "Une erreur est survenue. Veuillez reessayer ou contacter le support."
 }
+
+def mask_phone(phone):
+    """Masque un numero de telephone pour les logs"""
+    if not phone or len(phone) < 6:
+        return "***"
+    return phone[:3] + "***" + phone[-3:]
+
+def mask_data(data):
+    """Masque les donnees sensibles avant logging"""
+    if not isinstance(data, dict):
+        return data
+    
+    masked = {}
+    sensitive_keys = ["senderPhone", "receiverPhone", "phone", "msisdn"]
+    
+    for key, value in data.items():
+        if key in sensitive_keys and isinstance(value, str):
+            masked[key] = mask_phone(value)
+        elif isinstance(value, dict):
+            masked[key] = mask_data(value)
+        else:
+            masked[key] = value
+    return masked
+
+def require_admin_key(func):
+    """Decorateur pour proteger les endpoints admin"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get("X-Admin-Key")
+        if not ADMIN_API_KEY or auth_header != ADMIN_API_KEY:
+            return jsonify({"error": "Unauthorized"}), 401
+        return func(*args, **kwargs)
+    return wrapper
 
 @app.route('/')
 def home():
@@ -96,18 +133,17 @@ def create_transfer():
     amount = float(data['amount'])
     
     # Validation du montant
+    if amount <= 0:
+        return jsonify({"error": "Montant invalide"}), 400
+    
     if amount < 5:
         return jsonify({"error": "Montant minimum : 5 USD (ou equivalent)"}), 400
     
     max_amount = 500 if direction == "RDC_TO_KEN" else 500 * 129.50
     if amount > max_amount:
-        return jsonify({"error": f"Montant maximum depasse"}), 400
-    
-    if amount <= 0:
-        return jsonify({"error": "Montant invalide"}), 400
+        return jsonify({"error": "Montant maximum depasse"}), 400
     
     # Validation des numeros de telephone
-    import re
     if direction == "RDC_TO_KEN":
         if not re.match(r'^243[0-9]{9}$', data['senderPhone']):
             return jsonify({"error": "Numero expediteur invalide (format: 243XXXXXXXXX)"}), 400
@@ -138,67 +174,73 @@ def create_transfer():
         "status": "PENDING"
     }).execute()
 
-    # 2. Verifier le solde du wallet destination (seulement si CHECK_BALANCE est activé)
+    # 2. Verifier le solde du wallet destination (seulement si CHECK_BALANCE est activee)
     if CHECK_BALANCE:
         payout_currency = CURRENCIES[direction]["payout"]
         
-        balance_response = requests.get(
-            f"{PAWAPAY_URL}/v2/wallet-balances",
-            headers={"Authorization": f"Bearer {PAWAPAY_TOKEN}"}
-        )
-        
-        print("=== WALLET BALANCES ===")
-        print("Status:", balance_response.status_code)
-        print("Body:", balance_response.text)
-        print("=======================")
-        
-        if balance_response.status_code == 200:
-            balances = balance_response.json()
-            wallets = balances.get("balances", [])
-            payout_wallet = next((w for w in wallets if w.get("currency") == payout_currency), None)
+        try:
+            balance_response = requests.get(
+                f"{PAWAPAY_URL}/v2/wallet-balances",
+                headers={"Authorization": f"Bearer {PAWAPAY_TOKEN}"},
+                timeout=PAWAPAY_TIMEOUT
+            )
             
-            if payout_wallet:
-                available = float(payout_wallet.get("balance", 0))
-                if available < amount_received:
-                    supabase.table("transactions").update({
-                        "status": "FAILED",
-                        "failure_reason": "Service temporairement indisponible. Veuillez reessayer plus tard."
-                    }).eq("id", transaction_id).execute()
-                    
-                    return jsonify({
-                        "id": transaction_id,
-                        "status": "FAILED",
-                        "error": "INSUFFICIENT_LIQUIDITY",
-                        "message": "Service temporairement indisponible."
-                    }), 503
+            if balance_response.status_code == 200:
+                balances = balance_response.json()
+                wallets = balances.get("balances", [])
+                payout_wallet = next((w for w in wallets if w.get("currency") == payout_currency), None)
+                
+                if payout_wallet:
+                    available = float(payout_wallet.get("balance", 0))
+                    if available < amount_received:
+                        supabase.table("transactions").update({
+                            "status": "FAILED",
+                            "failure_reason": "Service temporairement indisponible."
+                        }).eq("id", transaction_id).execute()
+                        
+                        return jsonify({
+                            "id": transaction_id,
+                            "status": "FAILED",
+                            "error": "INSUFFICIENT_LIQUIDITY",
+                            "message": "Service temporairement indisponible."
+                        }), 503
+        except requests.Timeout:
+            print("Timeout lors du check de balance")
 
-    # 2. Initier le depot Pawapay
-    deposit_response = requests.post(
-        f"{PAWAPAY_URL}/deposits",
-        json={
-            "depositId": transaction_id,
-            "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "amount": str(int(amount)) if CORRESPONDENTS[direction]["deposit"] == "MPESA_KEN" else str(amount),
-            "currency": CURRENCIES[direction]["deposit"],
-            "correspondent": CORRESPONDENTS[direction]["deposit"],
-            "payer": {
-                "type": "MSISDN",
-                "address": {"value": data['senderPhone']}
+    # 3. Initier le depot Pawapay
+    try:
+        deposit_response = requests.post(
+            f"{PAWAPAY_URL}/deposits",
+            json={
+                "depositId": transaction_id,
+                "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "amount": str(int(amount)) if CORRESPONDENTS[direction]["deposit"] == "MPESA_KEN" else str(amount),
+                "currency": CURRENCIES[direction]["deposit"],
+                "correspondent": CORRESPONDENTS[direction]["deposit"],
+                "payer": {
+                    "type": "MSISDN",
+                    "address": {"value": data['senderPhone']}
+                },
+                "statementDescription": f"MuniaPay {transaction_id[:8]}"
             },
-            "statementDescription": f"MuniaPay {transaction_id[:8]}"
-        },
-        headers={
-            "Authorization": f"Bearer {PAWAPAY_TOKEN}",
-            "Content-Type": "application/json"
-        }
-    )
+            headers={
+                "Authorization": f"Bearer {PAWAPAY_TOKEN}",
+                "Content-Type": "application/json"
+            },
+            timeout=PAWAPAY_TIMEOUT
+        )
 
-    print("=== PAWAPAY DEPOSIT RESPONSE ===")
-    print("Status:", deposit_response.status_code)
-    print("Body:", deposit_response.text)
-    print("================================")
+        print("=== PAWAPAY DEPOSIT RESPONSE ===")
+        print("Status:", deposit_response.status_code)
+        print("================================")
+    except requests.Timeout:
+        print("Timeout Pawapay deposit")
+        return jsonify({"error": "Service temporairement indisponible."}), 504
+    except Exception as e:
+        print(f"Erreur Pawapay deposit: {type(e).__name__}")
+        return jsonify({"error": "Erreur lors de la creation du transfert."}), 500
 
-    # 3. Mettre a jour le statut
+    # 4. Mettre a jour le statut
     supabase.table("transactions").update(
         {"status": "COLLECTING"}
     ).eq("id", transaction_id).execute()
@@ -216,20 +258,26 @@ def create_transfer():
 def webhook_deposit():
     data = request.get_json()
     print("=== WEBHOOK DEPOSIT ===")
-    print("Body:", data)
+    print("Body:", mask_data(data))
     print("=======================")
     
     deposit_id = data.get("depositId")
     status = data.get("status")
 
+    # Idempotency : verifier l'etat actuel avant de traiter
+    result = supabase.table("transactions").select("*").eq("id", deposit_id).execute()
+    if not result.data:
+        return jsonify({"error": "Transaction introuvable"}), 404
+    
+    transaction = result.data[0]
+    current_status = transaction["status"]
+
     if status == "COMPLETED":
-        # Recuperer la transaction
-        result = supabase.table("transactions").select("*").eq("id", deposit_id).execute()
-        if not result.data:
-            return jsonify({"error": "Transaction introuvable"}), 404
-
-        transaction = result.data[0]
-
+        # Ne traiter que si on est encore au stade COLLECTING
+        if current_status != "COLLECTING":
+            print(f"Ignored: transaction {deposit_id} already in status {current_status}")
+            return jsonify({"status": "ignored"}), 200
+        
         # Mettre a jour le statut
         supabase.table("transactions").update(
             {"status": "SENDING"}
@@ -242,32 +290,44 @@ def webhook_deposit():
         ).eq("id", deposit_id).execute()
 
         # Initier le payout
-        payout_response = requests.post(
-            f"{PAWAPAY_URL}/payouts",
-            json={
-                "payoutId": payout_id,
-                "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "amount": str(transaction["amount_received"]),
-                "currency": CURRENCIES[transaction["direction"]]["payout"],
-                "correspondent": CORRESPONDENTS[transaction["direction"]]["payout"],
-                "recipient": {
-                    "type": "MSISDN",
-                    "address": {"value": transaction["receiver_phone"]}
+        try:
+            payout_response = requests.post(
+                f"{PAWAPAY_URL}/payouts",
+                json={
+                    "payoutId": payout_id,
+                    "customerTimestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "amount": str(int(transaction["amount_received"])) if CORRESPONDENTS[transaction["direction"]]["payout"] == "MPESA_KEN" else str(transaction["amount_received"]),
+                    "currency": CURRENCIES[transaction["direction"]]["payout"],
+                    "correspondent": CORRESPONDENTS[transaction["direction"]]["payout"],
+                    "recipient": {
+                        "type": "MSISDN",
+                        "address": {"value": transaction["receiver_phone"]}
+                    },
+                    "statementDescription": f"MuniaPay {deposit_id[:8]}"
                 },
-                "statementDescription": f"MuniaPay {deposit_id[:8]}"
-            },
-            headers={
-                "Authorization": f"Bearer {PAWAPAY_TOKEN}",
-                "Content-Type": "application/json"
-            }
-        )
-        print("=== PAYOUT INITIATED ===")
-        print("Status:", payout_response.status_code)
-        print("Body:", payout_response.text)
-        print("========================")
+                headers={
+                    "Authorization": f"Bearer {PAWAPAY_TOKEN}",
+                    "Content-Type": "application/json"
+                },
+                timeout=PAWAPAY_TIMEOUT
+            )
+            print("=== PAYOUT INITIATED ===")
+            print("Status:", payout_response.status_code)
+            print("========================")
+        except requests.Timeout:
+            print("Timeout Pawapay payout")
+            supabase.table("transactions").update({
+                "status": "FAILED",
+                "failure_reason": "Timeout lors de l'envoi. Un remboursement automatique sera effectue."
+            }).eq("id", deposit_id).execute()
+        except Exception as e:
+            print(f"Erreur Pawapay payout: {type(e).__name__}")
 
     elif status == "FAILED":
-        # Recuperer la raison de l'echec
+        # Idempotency
+        if current_status in ["FAILED", "REFUNDED"]:
+            return jsonify({"status": "ignored"}), 200
+        
         failure_reason_code = data.get("failureReason", {}).get("failureCode", "OTHER")
         failure_message = FAILURE_MESSAGES.get(failure_reason_code, FAILURE_MESSAGES["OTHER"])
         
@@ -283,7 +343,7 @@ def webhook_deposit():
 def webhook_payout():
     data = request.get_json()
     print("=== WEBHOOK PAYOUT ===")
-    print("Body:", data)
+    print("Body:", mask_data(data))
     print("======================")
     
     payout_id = data.get("payoutId")
@@ -297,38 +357,52 @@ def webhook_payout():
     
     transaction = result.data[0]
     transaction_id = transaction["id"]
+    current_status = transaction["status"]
 
     if status == "COMPLETED":
+        # Idempotency : ne traiter que si en SENDING
+        if current_status != "SENDING":
+            print(f"Ignored: transaction {transaction_id} already in status {current_status}")
+            return jsonify({"status": "ignored"}), 200
+        
         supabase.table("transactions").update(
             {"status": "COMPLETED"}
         ).eq("id", transaction_id).execute()
 
     elif status == "FAILED":
-        # Recuperer la raison de l'echec
+        # Idempotency
+        if current_status in ["FAILED", "REFUNDED"]:
+            return jsonify({"status": "ignored"}), 200
+        
         failure_reason_code = data.get("failureReason", {}).get("failureCode", "OTHER")
         failure_message = FAILURE_MESSAGES.get(failure_reason_code, FAILURE_MESSAGES["OTHER"])
         
         # Initier le refund automatique
         refund_id = str(uuid.uuid4())
-        refund_response = requests.post(
-            f"{PAWAPAY_URL}/refunds",
-            json={
-                "refundId": refund_id,
-                "depositId": transaction_id,
-                "amount": str(transaction["amount_sent"]),
-                "metadata": [
-                    {"fieldName": "reason", "fieldValue": f"Payout failed: {failure_reason_code}"}
-                ]
-            },
-            headers={
-                "Authorization": f"Bearer {PAWAPAY_TOKEN}",
-                "Content-Type": "application/json"
-            }
-        )
-        print("=== REFUND INITIATED ===")
-        print("Status:", refund_response.status_code)
-        print("Body:", refund_response.text)
-        print("========================")
+        try:
+            refund_response = requests.post(
+                f"{PAWAPAY_URL}/refunds",
+                json={
+                    "refundId": refund_id,
+                    "depositId": transaction_id,
+                    "amount": str(transaction["amount_sent"]),
+                    "metadata": [
+                        {"fieldName": "reason", "fieldValue": f"Payout failed: {failure_reason_code}"}
+                    ]
+                },
+                headers={
+                    "Authorization": f"Bearer {PAWAPAY_TOKEN}",
+                    "Content-Type": "application/json"
+                },
+                timeout=PAWAPAY_TIMEOUT
+            )
+            print("=== REFUND INITIATED ===")
+            print("Status:", refund_response.status_code)
+            print("========================")
+        except requests.Timeout:
+            print("Timeout Pawapay refund")
+        except Exception as e:
+            print(f"Erreur Pawapay refund: {type(e).__name__}")
         
         supabase.table("transactions").update({
             "status": "FAILED",
@@ -342,15 +416,25 @@ def webhook_payout():
 def webhook_refund():
     data = request.get_json()
     print("=== WEBHOOK REFUND ===")
-    print("Body:", data)
+    print("Body:", mask_data(data))
     print("======================")
     
-    refund_id = data.get("refundId")
     deposit_id = data.get("depositId")
     status = data.get("status")
     
-    if status == "COMPLETED" and deposit_id:
-        # Marquer le refund comme reussi
+    if not deposit_id:
+        return jsonify({"status": "ok"}), 200
+    
+    # Idempotency
+    result = supabase.table("transactions").select("*").eq("id", deposit_id).execute()
+    if not result.data:
+        return jsonify({"status": "ok"}), 200
+    
+    current_status = result.data[0]["status"]
+    if current_status == "REFUNDED":
+        return jsonify({"status": "ignored"}), 200
+    
+    if status == "COMPLETED":
         supabase.table("transactions").update({
             "status": "REFUNDED",
             "failure_reason": "Remboursement effectue avec succes."
@@ -368,6 +452,7 @@ def get_transfer(transaction_id):
 
 
 @app.route('/transactions', methods=['GET'])
+@require_admin_key
 def get_all_transactions():
     result = supabase.table("transactions").select("*").order("created_at", desc=True).execute()
     return jsonify(result.data), 200
