@@ -34,7 +34,9 @@ Aller sur Render → Service `fintrans-backend` → onglet **Environment**
 
 ## Vérifications post-déploiement
 
-Après avoir changé les variables, Render redéploie automatiquement. Tester :
+0. Après avoir changé les variables, Render redéploie automatiquement. Tester :
+
+Mettre à jour CORS dans app.py avec le custom domain quand muniapay.com est configuré.
 
 1. **Faire un transfert test de 1 USD** depuis ton propre numéro Mobile Money
 2. **Vérifier les logs Render** pour s'assurer que :
