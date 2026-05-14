@@ -51,7 +51,6 @@ def get_live_rates():
     }
 
 RATES = get_live_rates()
-}
 
 CORRESPONDENTS = {
     "RDC_TO_KEN": {"deposit": "AIRTEL_COD", "payout": "MPESA_KEN"},
