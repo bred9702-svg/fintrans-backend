@@ -67,6 +67,31 @@ def create_transfer():
         return jsonify({"error": "Direction invalide"}), 400
 
     amount = float(data['amount'])
+    
+    # Validation du montant
+    if amount < 5:
+        return jsonify({"error": "Montant minimum : 5 USD (ou equivalent)"}), 400
+    
+    max_amount = 500 if direction == "RDC_TO_KEN" else 500 * 129.50
+    if amount > max_amount:
+        return jsonify({"error": f"Montant maximum depasse"}), 400
+    
+    if amount <= 0:
+        return jsonify({"error": "Montant invalide"}), 400
+    
+    # Validation des numeros de telephone
+    import re
+    if direction == "RDC_TO_KEN":
+        if not re.match(r'^243[0-9]{9}$', data['senderPhone']):
+            return jsonify({"error": "Numero expediteur invalide (format: 243XXXXXXXXX)"}), 400
+        if not re.match(r'^254[0-9]{9}$', data['receiverPhone']):
+            return jsonify({"error": "Numero beneficiaire invalide (format: 254XXXXXXXXX)"}), 400
+    else:
+        if not re.match(r'^254[0-9]{9}$', data['senderPhone']):
+            return jsonify({"error": "Numero expediteur invalide (format: 254XXXXXXXXX)"}), 400
+        if not re.match(r'^243[0-9]{9}$', data['receiverPhone']):
+            return jsonify({"error": "Numero beneficiaire invalide (format: 243XXXXXXXXX)"}), 400
+    
     fees = round(amount * FEE_PERCENT, 2)
     net = amount - fees
     amount_received = round(net * RATES[direction], 2)
